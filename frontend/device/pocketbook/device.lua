@@ -330,6 +330,60 @@ function PocketBook:reboot()
     inkview.iv_ipc_request(C.MSG_REBOOT, 1, nil, 0, 0)
 end
 
+function PocketBook:toggleGSensor(toggle)
+    inkview.SetGSensorEnabled(toggle)
+    self:startGSensorPoll()
+end
+
+function PocketBook:startGSensorPoll()
+    local UIManager = require("ui/uimanager")
+    local Event = require("ui/event")
+
+    local function pollGSensorForOrientationChange()
+        -- Make sure only one pollGSensorForOrientationChange is scheduled
+        UIManager:unschedule(pollGSensorForOrientationChange)
+
+        if (inkview.IsGSensorEnabled()) then
+            local gsensorOrientation = inkview.GetGSensorOrientation()
+
+            logger.dbg("poll gsensor for orientation and reschedule", gsensorOrientation)
+
+            local rotation_mode, screen_mode
+            if gsensorOrientation == 0 then
+                rotation_mode = self.screen.ORIENTATION_PORTRAIT
+                screen_mode = 'portrait'
+            elseif gsensorOrientation == 1 then
+                rotation_mode = self.screen.ORIENTATION_LANDSCAPE_ROTATED
+                screen_mode = 'landscape'
+            elseif gsensorOrientation == 2 then
+                rotation_mode = self.screen.ORIENTATION_LANDSCAPE
+                screen_mode = 'landscape'
+            elseif gsensorOrientation == 3 then
+                rotation_mode = self.screen.ORIENTATION_PORTRAIT_ROTATED
+                screen_mode = 'portrait'
+            end
+
+            local old_rotation_mode = self.screen:getRotationMode()
+            if self:isGSensorLocked() then
+                local old_screen_mode = self.screen:getScreenMode()
+                if rotation_mode and rotation_mode ~= old_rotation_mode and screen_mode == old_screen_mode then
+                    -- Cheaper than a full SetRotationMode event, as we don't need to re-layout anything.
+                    self.screen:setRotationMode(rotation_mode)
+                    UIManager:onRotation()
+                end
+            else
+                if rotation_mode and rotation_mode ~= old_rotation_mode then
+                    UIManager:broadcastEvent(Event:new("SetRotationMode", rotation_mode))
+                end
+            end
+
+            UIManager:scheduleIn(1, pollGSensorForOrientationChange)
+        end
+    end
+
+    pollGSensorForOrientationChange()
+end
+
 function PocketBook:initNetworkManager(NetworkMgr)
     local UIManager = require("ui/uimanager")
 
@@ -629,6 +683,8 @@ local PocketBook741 = PocketBook:extend{
     display_dpi = 300,
     color_saturation = 1.5,
     hasColorScreen = yes,
+    hasGSensor = yes,
+    canToggleGSensor = yes,
     canHWDither = yes, -- Adjust color saturation with inkview
     canUseCBB = no, -- 24bpp
     isAlwaysPortrait = yes,
